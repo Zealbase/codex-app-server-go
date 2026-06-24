@@ -24,10 +24,6 @@
 | Hooks (server-side) | 1/1 | ✅ list |
 | Command exec (PTY) | 4/4 | ✅ exec · write · resize · terminate + streaming |
 | Transports | — | ✅ stdio · WebSocket · 🚧 HTTP+SSE (WIP) · retry/reconnect |
-| Filesystem ops | 0/10 | ⬜ not implemented |
-| Plugins / marketplace | 0/14 | ⬜ not implemented |
-| MCP server lifecycle | 0/4 | ⬜ not implemented |
-| Remote control | 0/2 | ⬜ not implemented |
 
 Server → client notifications: **65 of 68** typed-decoded.
 
