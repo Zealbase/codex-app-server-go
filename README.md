@@ -1,25 +1,49 @@
-# codex-go
+# codex-app-server-go
 
-> Start using the Codex app-server in Go — a typed client that implements the official Codex app-server **v2** JSON-RPC spec.
+> A typed Go client for the Codex app-server **v2** JSON-RPC protocol — drive AI coding agents from Go.
 
-`github.com/nharness/sdk/codex-go` is a Go client SDK for the [Codex](https://github.com/openai/codex)
-app-server. It speaks the app-server's JSON-RPC 2.0 protocol over stdio, WebSocket, or HTTP+SSE,
-and exposes both a high-level `SessionThread` API and the raw RPC surface.
+[![Go Reference](https://pkg.go.dev/badge/github.com/zealbase/codex-app-server-go/codexgo.svg)](https://pkg.go.dev/github.com/zealbase/codex-app-server-go/codexgo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zealbase/codex-app-server-go)](https://goreportcard.com/report/github.com/zealbase/codex-app-server-go)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](go.mod)
+[![Protocol](https://img.shields.io/badge/codex--cli-0.142.0-orange)](codexgo/internal/protocol/schema/version.go)
 
-- **Version:** `v0.2.0` · **Protocol:** Codex app-server **v2** · **Go:** 1.25+
-- **Verified against:** codex-cli `0.142.0`
+## What's Implemented
+
+| Subsystem | Covered | Status |
+|---|:---:|---|
+| Core / Initialize | 1/1 | ✅ |
+| Thread | 20/22 | ✅ start · resume · fork · list · read · archive · unarchive · set-name · rollback · loaded-list · compact · goal-set/get/clear · metadata-update · unsubscribe · delete · inject-items · shell-command · approve-guardian |
+| Turn | 3/4 | ✅ start · steer · interrupt |
+| Account / Login | 3/4 | ✅ api-key · chatgpt · device-code · get-account · cancel-login |
+| Models | 2/2 | ✅ list · provider-capabilities |
+| Review | 1/1 | ✅ review/start |
+| Config CRUD | 3/3 | ✅ read · value-write · batch-write |
+| Skills | 3/3 | ✅ list · config-write · extra-roots-set |
+| Experimental features | 2/2 | ✅ list · enablement-set |
+| Hooks (server-side) | 1/1 | ✅ list |
+| Command exec (PTY) | 4/4 | ✅ exec · write · resize · terminate + streaming |
+| Transports | — | ✅ stdio · WebSocket · 🚧 HTTP+SSE (WIP) · retry/reconnect |
+| Filesystem ops | 0/10 | ⬜ not implemented |
+| Plugins / marketplace | 0/14 | ⬜ not implemented |
+| MCP server lifecycle | 0/4 | ⬜ not implemented |
+| Remote control | 0/2 | ⬜ not implemented |
+
+Server → client notifications: **65 of 68** typed-decoded.
 
 ## Install
 
 ```bash
-go get github.com/nharness/sdk/codex-go
+go get github.com/zealbase/codex-app-server-go/codexgo
 ```
 
 ```go
-import codexgo "github.com/nharness/sdk/codex-go"
+import codexgo "github.com/zealbase/codex-app-server-go/codexgo"
 ```
 
-## Quickstart
+**Version:** `v0.2.0` · **Protocol:** Codex app-server **v2** · **Go:** 1.25+
+
+## How to Use
 
 ### Local binary (stdio)
 
@@ -38,7 +62,7 @@ _, _ = client.Initialize(ctx, codexgo.InitializeRequest{
     Capabilities: codexgo.Capabilities{ExperimentalAPI: true},
 })
 
-thread, _ := client.StartThread(ctx, codexgo.WithThreadModel("gpt-5.4"))
+thread, _ := client.StartThread(ctx, codexgo.WithThreadModel("claude-opus-4-8"))
 defer thread.Close()
 
 result, _ := thread.Run(ctx, "Summarize this repo in one sentence.")
@@ -56,28 +80,22 @@ client, _ := codexgo.New(
     codexgo.WithWSTransport(dialCtx, "ws://codex-server.example.com"),
 )
 defer client.Close()
-// WS transport auto-initializes; go straight to StartThread.
-thread, _ := client.StartThread(ctx, codexgo.WithThreadModel("gpt-5.4"))
+thread, _ := client.StartThread(ctx, codexgo.WithThreadModel("claude-opus-4-8"))
 ```
 
-## Examples
-
-| Topic | What it shows |
-|---|---|
-| `SessionThread.Run` | synchronous turn + `FinalAgentText()` / `Usage` |
-| `SessionThread.RunStreamed` | streaming deltas over a channel |
-| `WaitForStructuredOutput` | JSON-schema-constrained output into a Go struct |
-| Approvals | `WithApprovalHandler` / `AutoAcceptApprovalHandler` |
-| Transports | stdio, WebSocket, HTTP+SSE (WIP), retry/reconnect |
-| Interactive exec | `CommandExec` + `CommandExecHandle` (write/resize/terminate) |
-
-A complete multi-agent example lives at
-`examples/sdk/codex-go-usage/existing-app-server-multi-agent-search`.
-
-Structured-output sketch:
+### Streaming
 
 ```go
-sub := client.Events(); defer sub.Close()   // subscribe before the turn
+ch, _ := thread.RunStreamed(ctx, "Explain this codebase.")
+for delta := range ch {
+    fmt.Print(delta.Text)
+}
+```
+
+### Structured output
+
+```go
+sub := client.Events(); defer sub.Close()
 turn, _ := client.TurnStart(ctx, codexgo.TurnStartRequest{
     ThreadID:     thread.ID(),
     Input:        "Return {\"answer\":\"PONG\",\"n\":42} as JSON.",
@@ -87,33 +105,43 @@ var out struct{ Answer string; N int }
 _, _ = client.WaitForStructuredOutput(ctx, thread.ID(), turn.ID, &out)
 ```
 
-## Protocol coverage
+## Full Protocol Coverage
 
-The SDK implements **43 / 84** callable app-server RPC methods (**~51%**) and typed-decodes
-**65 / 68** server notifications (**~96%**), as of codex-cli `0.142.0`.
+Verified against **codex-cli `0.142.0`** · schema sha256 `935c753c…`
 
-| Subsystem | Coverage |
-|---|---|
-| Core / Thread / Turn | Initialize · Thread 20/20 callable · Turn 3/3 callable |
-| Account / login | login (api-key / chatgpt / device-code), read, logout |
-| Goals | set / get / clear |
-| Models | list · provider capabilities |
-| Config CRUD | read · value-write · batch-write |
-| Skills | list · config-write · extra-roots-set |
-| Experimental features | list · enablement-set |
-| Hooks (server-side) | list |
-| Command exec (PTY) | exec · write · resize · terminate (+ streaming) |
-| Transports | stdio · WebSocket · HTTP+SSE (WIP) · retry/reconnect |
+| Axis | Covered | Total | % |
+|---|---:|---:|---:|
+| RPC request methods | 43 | 84 | **51%** |
+| Server notifications (typed-decoded) | 65 | 68 | **~96%** |
+| Full message surface | ~108 | 152 | **~71%** |
 
-**Not yet covered:** filesystem ops, plugins/marketplace, MCP server lifecycle, remote control,
-and misc editor-backend RPCs. Full breakdown:
-[`gen/codex-go-protocol-coverage.md`](../../gen/codex-go-protocol-coverage.md).
+**RPC by group:**
+
+| Group | Covered | Total | % |
+|---|---:|---:|---:|
+| Thread | 20 | 22 | 91% |
+| Turn | 3 | 4 | 75% |
+| Account | 3 | 4 | 75% |
+| Core + Review | 2 | 2 | 100% |
+| Models | 2 | 2 | 100% |
+| Config CRUD | 3 | 3 | 100% |
+| Skills | 3 | 3 | 100% |
+| Experimental | 2 | 2 | 100% |
+| Hooks | 1 | 1 | 100% |
+| Command exec (PTY) | 4 | 4 | 100% |
+| Filesystem | 0 | 10 | 0% |
+| Plugins / marketplace | 0 | 14 | 0% |
+| Misc | 0 | 7 | 0% |
+| MCP lifecycle | 0 | 4 | 0% |
+| Remote control | 0 | 2 | 0% |
+
+See [`codexgo/gen/conformance-report.md`](codexgo/gen/conformance-report.md) for the full method-by-method breakdown.
 
 ## Documentation
 
-- [`docs/index.md`](docs/index.md) — guide, transports, SessionThread, wait helpers
-- [`docs/api-reference.md`](docs/api-reference.md) — full type & method reference
-- [`llms.txt`](llms.txt) / [`llms-full.txt`](llms-full.txt) — machine-readable references
+- [`codexgo/docs/index.md`](codexgo/docs/index.md) — guide, transports, SessionThread, wait helpers
+- [`codexgo/docs/api-reference.md`](codexgo/docs/api-reference.md) — full type & method reference
+- [`codexgo/llms.txt`](codexgo/llms.txt) / [`codexgo/llms-full.txt`](codexgo/llms-full.txt) — machine-readable references
 
 ## Protocol reference
 
@@ -125,16 +153,11 @@ codex app-server generate-json-schema --out <dir>
 ```
 
 A pinned copy ships at
-`internal/protocol/schema/codex_app_server_protocol.v2.schemas.json` (title
-`CodexAppServerProtocolV2`). Upstream protocol source:
-[`openai/codex`](https://github.com/openai/codex) — `codex-rs/app-server-protocol/`.
-When targeting a different codex-cli build, regenerate types with `make generate` and
-re-run the coverage extraction, since method availability can shift between versions
-(use a **similar spec version** to the codex binary you connect to).
+`codexgo/internal/protocol/schema/codex_app_server_protocol.v2.schemas.json`.
+Upstream protocol source: [`openai/codex`](https://github.com/openai/codex) —
+`codex-rs/app-server-protocol/`.
 
 ## License
 
 Licensed under the **Apache License, Version 2.0**, consistent with upstream Codex.
-See the repository `LICENSE` for the full text. Unless required by applicable law or agreed
-to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+See [`LICENSE`](LICENSE) for the full text.

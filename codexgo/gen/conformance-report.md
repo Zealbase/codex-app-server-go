@@ -1,188 +1,141 @@
-# codex-go Conformance Report
+# codex-app-server-go Protocol Coverage
 
-Date: 2026-06-22
+**Report date:** 2026-06-23
+**Scope:** Coverage of the Codex app-server JSON-RPC v2 protocol by the `codexgo` SDK,
+cross-referenced against the official OpenAI Python SDK.
 
-Scope:
-- Public Go package: `sdk/codex-go`
-- Internal protocol constants: `sdk/codex-go/internal/protocol/envelope.go`
-- Internal transport notifications: `sdk/codex-go/internal/transport/jsonrpc.go`
-- Public docs: `sdk/codex-go/docs/*.md`
+---
 
-## Summary
+## 1. Summary
 
-The SDK now has a usable schema-backed request/response client, a public live notification API, and public wait helpers for terminal turn state and final output recovery.
+The Codex app-server protocol (v2 schema) defines **84 RPC request methods** (client → server
+calls) and **68 server-push notifications**. The `codexgo` SDK implements the
+thread/turn/account/goal/login **agent-driving core** and intentionally omits the
+"codex-as-IDE-backend" subsystems (filesystem, interactive PTY exec, plugin/skill/MCP
+management).
 
-Remaining gaps:
-- No replayable event history for late subscribers
-- No public wrappers yet for `turn/steer`, `review/start`, or `model/list`
-- No WebSocket / HTTP transport yet
+| Axis | Covered | Total | % |
+|---|---:|---:|---:|
+| **RPC request methods** (callable app-server methods) | 43 | 84 | **51%** |
+| **Notifications** (server → client, typed-decoded) | 65 | 68 | **~96%** |
+| **Full message surface** (requests + notifications) | ~108 | 152 | **~71%** |
 
-## RPC Methods By Group
+### Key findings
 
-| Group | Method | Internal Protocol Constant | Public Client Method | Implemented |
-| --- | --- | --- | --- | --- |
-| Session | `initialize` | `MethodInitialize` | `Initialize` | Yes |
-| Session | `initialized` | `MethodInitialized` | sent internally by `Initialize` | Yes |
-| Thread | `thread/start` | `MethodThreadStart` | `ThreadStart` | Yes |
-| Thread | `thread/resume` | `MethodThreadResume` | `ThreadResume` | Yes |
-| Thread | `thread/read` | `MethodThreadRead` | `ThreadRead` | Yes |
-| Turn | `turn/start` | `MethodTurnStart` | `TurnStart` | Yes |
-| Turn | `turn/steer` | `MethodTurnSteer` | none | No |
-| Turn | `turn/interrupt` | `MethodTurnInterrupt` | `TurnInterrupt` | Yes |
-| Review | `review/start` | `MethodReviewStart` | none | No |
-| Models | `model/list` | `MethodModelList` | internal via `loadModelCatalog` | Partial |
+1. **51% RPC coverage.** The 41 still-uncovered RPC methods belong to editor-backend
+   subsystems (filesystem, plugins/marketplace, MCP lifecycle, remote control, misc). The
+   agent-conversation core, Config/Skills/Experimental/Hooks/CommandExec, and
+   Thread/Turn/Models extras are fully implemented.
 
-Notes:
-- `model/list` is only used for client-side validation support, not exposed as a public method.
-- `turn/steer` and `review/start` exist in protocol constants but have no public client wrapper.
+2. **Go exceeds the official Python SDK's callable surface.** Python's `api.py`/`client.py`
+   implements only the thread/turn/account/goal/login set; Config CRUD, Skills, Experimental
+   features, Hooks/list, and interactive CommandExec exist in Python **only as generated
+   wire-types** with no callable methods. The Go SDK drives all five as real RPCs.
 
-## Server Notification Methods By Group
+3. **On the implemented surface, Go is at parity-or-ahead of Python.** Go additionally ships:
+   thread rollback, review mode, structured-output collector, HTTP/WS transports,
+   transport retry/reconnect, and a Unix-socket hook bridge.
 
-| Group | Method | Internal Constant | Typed Internal Struct Exists | Public Typed API | Public Subscription API | Implemented |
-| --- | --- | --- | --- | --- | --- | --- |
-| Turn | `turn/started` | `MethodTurnStarted` | Yes | Yes | Yes | Yes |
-| Turn | `turn/completed` | `MethodTurnCompleted` | Yes | Yes | Yes | Yes |
-| Turn | `turn/diff/updated` | `MethodTurnDiffUpdated` | Yes | Yes | Yes | Yes |
-| Turn | `turn/plan/updated` | `MethodTurnPlanUpdated` | Yes | Yes | Yes | Yes |
-| Thread | `thread/tokenUsage/updated` | `MethodThreadTokenUsageUpdated` | Yes | Yes | Yes | Yes |
-| Item | `item/started` | `MethodItemStarted` | Yes | Yes | Yes | Yes |
-| Item | `item/completed` | `MethodItemCompleted` | Yes | Yes | Yes | Yes |
-| Item | `item/agentMessage/delta` | `MethodItemAgentMessageDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/plan/delta` | `MethodItemPlanDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/reasoning/summaryTextDelta` | `MethodItemReasoningSummaryTextDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/reasoning/summaryPartAdded` | `MethodItemReasoningSummaryPartAdded` | Yes | Yes | Yes | Yes |
-| Item | `item/reasoning/textDelta` | `MethodItemReasoningTextDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/commandExecution/outputDelta` | `MethodItemCommandExecutionOutputDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/fileChange/patchUpdated` | `MethodItemFileChangePatchUpdated` | Yes | Yes | Yes | Yes |
-| Item | `item/fileChange/outputDelta` | `MethodItemFileChangeOutputDelta` | Yes | Yes | Yes | Yes |
-| Item | `item/autoApprovalReview/started` | `MethodItemAutoApprovalReviewStarted` | Yes | Yes | Yes | Yes |
-| Item | `item/autoApprovalReview/completed` | `MethodItemAutoApprovalReviewCompleted` | Yes | Yes | Yes | Yes |
-| Error | `error` | `MethodError` | Yes | Yes | Yes | Yes |
+4. **Conversation use cases are functionally complete.** Start/resume/fork threads, run/steer/
+   interrupt turns, stream events, handle approvals, drive goals, log in, roll back, and
+   extract structured output are all supported.
 
-Notes:
-- The internal transport already receives all notifications through `Notifications()`.
-- Only a subset has typed internal structs today.
-- None are currently exposed from the public package in a usable runtime API.
+---
 
-## Public Exposed Modules
+## 2. Detailed protocol table — RPC methods (84)
 
-| File / Module | Public Role | Status |
-| --- | --- | --- |
-| `client.go` | core client methods, stdio transport wiring | Implemented |
-| `types.go` | request/response type aliases | Implemented |
-| `approval.go` | approval and server-request handlers | Implemented |
-| `options.go` | options and transport abstraction | Implemented |
-| `thread.go` | thread docs placeholder | Minimal |
-| `turn.go` | turn docs placeholder | Minimal |
-| `event.go` | public event payloads and event envelope | Implemented |
-| `events_decode.go` | notification decode registry | Implemented |
-| `events_stream.go` | subscription broker | Implemented |
-| `wait.go` | terminal turn wait helper | Implemented |
-| `output.go` | final text and structured output helpers | Implemented |
-| `doc.go` | package docs | Implemented |
+Legend: ✅ implemented · ⬜ not implemented · 🔒 server→client request the SDK *answers* (not a client call).
 
-## Public API Conformance Table
+### Covered subsystems
 
-| Surface | Expected Use | Current State | Status |
-| --- | --- | --- | --- |
-| Core RPC methods | start/read/interact with app-server | available | Yes |
-| Public event subscription | consume runtime notifications as they happen | `Events()` + `EventSubscription` | Yes |
-| Typed event decoding | decode server notifications by method into typed Go values | public `Event.Value` typed payloads | Yes |
-| Wait for terminal turn | block until completed/failed/interrupted | `WaitForTurn` | Yes |
-| Wait for final assistant output | collect final message/result reliably | `WaitForFinalAgentMessage` | Yes |
-| Wait for structured output | recover schema-constrained final payload | `WaitForStructuredOutput` | Yes |
-| Public model listing | inspect app-server model catalog | absent | No |
-| Public steer/review methods | full method wrapper parity with constants | absent | No |
+| Subsystem | Covered | Methods |
+|---|---:|---|
+| **Core** | 1/1 | ✅ Initialize |
+| **Thread** | 20/22 | ✅ ThreadStart, ThreadResume, ThreadFork, ThreadList, ThreadRead, ThreadArchive, ThreadUnarchive, ThreadSetName, ThreadRollback, ThreadLoadedList, ThreadCompactStart, ThreadGoalSet, ThreadGoalGet, ThreadGoalClear, ThreadMetadataUpdate, ThreadUnsubscribe, ThreadDelete, ThreadInjectItems, ThreadShellCommand, ThreadApproveGuardianDeniedAction · ⬜ ThreadMetadataGitInfoUpdate, ThreadResumeInitialTurnsPage *(nested sub-types, not callable RPCs)* |
+| **Turn** | 3/4 | ✅ TurnStart, TurnSteer, TurnInterrupt · ⬜ TurnEnvironment *(not a registered RPC in 0.142.0)* |
+| **Account** | 3/4 | ✅ LoginAccount, CancelLoginAccount, GetAccount · ⬜ ConsumeAccountRateLimitResetCredit |
+| **Models** | 2/2 | ✅ ModelList, ModelProviderCapabilitiesRead |
+| **Review** | 1/1 | ✅ ReviewStart |
+| **Config CRUD** | 3/3 | ✅ ConfigRead, ConfigValueWrite, ConfigBatchWrite |
+| **Skills** | 3/3 | ✅ SkillsList, SkillsConfigWrite, SkillsExtraRootsSet |
+| **Experimental** | 2/2 | ✅ ExperimentalFeatureList, ExperimentalFeatureEnablementSet |
+| **Hooks (server-side)** | 1/1 | ✅ HooksList |
+| **Command exec (PTY)** | 4/4 | ✅ CommandExec, CommandExecWrite, CommandExecResize, CommandExecTerminate |
 
-## Docs Conformance Table
+### Uncovered subsystems
 
-| Topic | Current Docs State | Conformant |
-| --- | --- | --- |
-| Core client methods | mostly accurate | Yes |
-| Event support | docs describe the public live event API | Yes |
-| Practical completion flow | docs and example use wait helpers and event subscriptions | Yes |
-| Public module map | docs match the actual public event/wait modules | Yes |
+| Subsystem | Total | Methods |
+|---|---:|---|
+| **Filesystem** | 10 | ⬜ FsReadFile, FsWriteFile, FsReadDirectory, FsCreateDirectory, FsCopy, FsRemove, FsGetMetadata, FsWatch, FsUnwatch, FuzzyFileSearch |
+| **Plugins / marketplace** | 14 | ⬜ PluginInstall, PluginInstalled, PluginList, PluginRead, PluginUninstall, PluginShareCheckout, PluginShareDelete, PluginShareList, PluginShareSave, PluginShareUpdateTargets, PluginSkillRead, MarketplaceAdd, MarketplaceRemove, MarketplaceUpgrade |
+| **Misc** | 7 | ⬜ AppsList, FeedbackUpload, ExternalAgentConfigDetect, ExternalAgentConfigImport, PermissionProfileList, SendAddCreditsNudgeEmail, WindowsSandboxSetupStart |
+| **MCP server lifecycle** | 4 | ⬜ ListMcpServerStatus, McpServerToolCall, McpResourceRead, McpServerOauthLogin |
+| **Remote control** | 2 | ⬜ RemoteControlEnable, RemoteControlDisable |
 
-## Modular Implementation Plan
+### Incoming server-requests the SDK answers (🔒)
 
-### Phase 1: Public Event Surface
+Handled by the approval `Dispatcher`, not counted in the 84:
 
-Add a regeneration-safe public event layer in new non-generated files:
-- `sdk/codex-go/events.go`
-- `sdk/codex-go/events_decode.go`
-- `sdk/codex-go/events_stream.go`
+- 🔒 `item/commandExecution/requestApproval`
+- 🔒 `item/fileChange/requestApproval`
+- 🔒 `item/mcp/requestApproval`
+- 🔒 `item/permissions/requestApproval`
+- 🔒 `item/tool/call` (dynamic tool call)
+- 🔒 `item/tool/requestUserInput`
 
-Planned API:
-- `type Event interface`
-- `type Notification struct`
-- `type EventStream struct`
-- `func (c *Client) Events() *EventStream`
-- `func (s *EventStream) C() <-chan Event`
-- `func (s *EventStream) Close()`
+---
 
-Design:
-- keep generated schema files untouched
-- keep internal transport package unchanged except for minimal adapter hooks if needed
-- decode each notification by method into typed public event structs where possible
-- fall back to a generic notification event for methods that do not yet have a dedicated struct
+## 3. Notifications (68) — coverage overview
 
-### Phase 2: Typed Event Coverage
+The SDK typed-decodes **65 of 68** notifications; only 3 schema-only (non-wire-registered)
+notifications fall through to `RawNotificationEvent`. Original 27 are wired in `events.go` /
+`events_extra.go`; the 38 added in phase 3 live in `events_extra.go`.
 
-Expose typed public structs in a new public file:
-- `TurnStartedEvent`
-- `TurnCompletedEvent`
-- `ItemStartedEvent`
-- `ItemCompletedEvent`
-- `ThreadTokenUsageUpdatedEvent`
-- `TurnDiffUpdatedEvent`
-- `TurnPlanUpdatedEvent`
-- `ErrorEvent`
-- delta-style item notification structs for currently untyped methods
+**Phase-3 additions (events_extra.go):**
+- *Thread/account:* `thread/deleted`, `thread/name/updated`, `thread/compacted`,
+  `thread/settings/updated`, `account/updated`, `account/rateLimits/updated`
+- *Warnings/model:* `warning`, `configWarning`, `deprecationNotice`, `guardianWarning`,
+  `windows/worldWritableWarning`, `windowsSandbox/setupCompleted`, `model/rerouted`,
+  `model/verification`, `turn/moderationMetadata`
+- *Process/exec/hooks:* `process/exited`, `process/outputDelta`,
+  `item/commandExecution/terminalInteraction`, `item/mcpToolCall/progress`, `hook/started`,
+  `hook/completed`, `rawResponseItem/completed`
+- *Subsystem status:* `mcpServer/startupStatus/updated`, `mcpServer/oauthLogin/completed`,
+  `skills/changed`, `fs/changed`, `app/list/updated`, `remoteControl/status/changed`,
+  `externalAgentConfig/import/completed`, `externalAgentConfig/import/progress`
+- *Realtime audio:* 8× `thread/realtime/*` (started, closed, error, itemAdded, sdp,
+  outputAudio/delta, transcript/delta, transcript/done)
 
-Design:
-- re-export or mirror the internal structs only where the public shape is stable
-- add a method-to-decoder registry for modular extension
-- ensure unknown notification methods still flow through as generic events
+---
 
-### Phase 3: Wait Helpers
+## 4. Version pins
 
-Add new public helpers in new files:
-- `sdk/codex-go/wait.go`
-- `sdk/codex-go/output.go`
+| Component | Version / ref |
+|---|---|
+| **Go module** | `github.com/zealbase/codex-app-server-go` |
+| **SDK version** | `v0.2.0` |
+| **Go toolchain** | `go 1.25.0` |
+| **WebSocket dep** | `nhooyr.io/websocket v1.8.17` |
+| **JSON-RPC dep** | `github.com/creachadair/jrpc2 v1.3.5` |
+| **Protocol schema** | `codex_app_server_protocol.v2.schemas.json` (title `CodexAppServerProtocolV2`) |
+| **Schema sha256** | `935c753c973a7cba99ba9c7b280218848a61a695b56a3d7512bc4db0fd4027bd` |
+| **Schema definitions** | 496 total · 84 `*Params` · 68 `*Notification` · 4 `*Result` |
+| **codex binary** | `codex-cli 0.142.0` |
 
-Planned API:
-- `func (c *Client) WaitForTurn(ctx context.Context, threadID, turnID string) (Turn, error)`
-- `func (c *Client) WaitForFinalAgentMessage(ctx context.Context, threadID, turnID string) (string, error)`
-- `func (c *Client) WaitForStructuredOutput(ctx context.Context, threadID, turnID string, out any) (Turn, error)`
+---
 
-Design:
-- prefer event-driven completion when notifications are available
-- fall back to `ThreadRead` polling when event transport is unavailable or misses history
-- search completed turn items and raw payloads conservatively
-- return terminal turn state together with extraction results
+## 5. Methodology
 
-### Phase 4: Method Parity Follow-Up
+- **84 RPC methods**: count of `*Params` definitions in the v2 schema.
+- **68 notifications**: count of `*Notification` definitions in the same schema.
+- **43 covered RPC methods**: intersection of schema `*Params` names with wire methods the Go
+  SDK calls via `Method*` constants in `internal/protocol/*.go`.
+- Coverage grew: 23 → 36 (phase 1: Config 3, Skills 3, Experimental 2, Hooks 1, CommandExec 4)
+  → 43 (phase 2: Thread extras 6, ModelProviderCapabilitiesRead 1).
 
-After the above:
-- expose `ModelList`
-- decide whether to expose `TurnSteer`
-- decide whether to expose `ReviewStart`
+---
 
-These are second-order gaps and should not block event/wait support.
+## 6. Related
 
-## Execution Order
-
-1. Introduce the public event stream and notification adapter.
-2. Add typed decode coverage and generic fallback events.
-3. Add wait helpers built on top of the event stream with polling fallback.
-4. Update examples to use only the public package.
-5. Update docs to match the actual public API.
-6. Run unit tests and e2e tests.
-
-## Acceptance Criteria
-
-- A caller can subscribe to runtime notifications without importing any `internal` package.
-- A caller can wait for a turn to finish without writing their own polling loop.
-- A caller can retrieve final assistant output and structured output through public helpers.
-- Existing request/response API remains backward compatible.
-- Generated schema files remain untouched.
+- [`docs/api-reference.md`](../docs/api-reference.md) — full implemented API surface
+- [`llms-full.txt`](../llms-full.txt) — machine-readable reference
