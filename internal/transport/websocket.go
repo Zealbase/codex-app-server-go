@@ -12,8 +12,9 @@ import (
 // WebSocketTransport implements Transport over a full-duplex JSON-RPC 2.0
 // WebSocket connection, as used by the Codex app-server WebSocket transport.
 type WebSocketTransport struct {
-	url     string
-	headers http.Header
+	url        string
+	headers    http.Header
+	httpClient *http.Client
 
 	conn    *websocket.Conn
 	mu      sync.Mutex
@@ -51,6 +52,11 @@ func WithWSAPIKey(key string) WSOption {
 	return WithWSHeader("X-API-Key", key)
 }
 
+// WithWSHTTPClient sets a custom HTTP client for the WebSocket dial (e.g. for Unix socket dialing).
+func WithWSHTTPClient(c *http.Client) WSOption {
+	return func(w *WebSocketTransport) { w.httpClient = c }
+}
+
 // NewWebSocket dials the given ws:// URL and starts the read loop.
 func NewWebSocket(ctx context.Context, url string, opts ...WSOption) (*WebSocketTransport, error) {
 	w := &WebSocketTransport{
@@ -66,6 +72,7 @@ func NewWebSocket(ctx context.Context, url string, opts ...WSOption) (*WebSocket
 
 	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		HTTPHeader: w.headers,
+		HTTPClient: w.httpClient,
 	})
 	if err != nil {
 		return nil, err

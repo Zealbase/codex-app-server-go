@@ -3,6 +3,8 @@ package codexgo
 import (
 	"context"
 	"io"
+	"net"
+	"net/http"
 
 	"github.com/zealbase/codex-app-server-go/internal/transport"
 )
@@ -189,6 +191,36 @@ func WithWSTransport(ctx context.Context, url string) Option {
 			opts = append(opts, transport.WithWSHeader(k, v))
 		}
 		ws, err := transport.NewWebSocket(ctx, url, opts...)
+		if err != nil {
+			return err
+		}
+		cfg.innerTransport = ws
+		cfg.autoInit = true
+		return nil
+	}
+}
+
+// WithUnixSocketWSTransport connects to the codex app-server daemon via
+// WebSocket over a Unix domain socket (the local daemon control socket).
+// socketPath defaults to the standard daemon socket if empty.
+func WithUnixSocketWSTransport(ctx context.Context, socketPath string) Option {
+	return func(cfg *clientConfig) error {
+		if socketPath == "" {
+			socketPath = defaultDaemonSocketPath()
+		}
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+				},
+			},
+		}
+		var opts []transport.WSOption
+		for k, v := range cfg.wsAuthHeaders {
+			opts = append(opts, transport.WithWSHeader(k, v))
+		}
+		opts = append(opts, transport.WithWSHTTPClient(httpClient))
+		ws, err := transport.NewWebSocket(ctx, "ws://localhost/", opts...)
 		if err != nil {
 			return err
 		}

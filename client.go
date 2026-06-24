@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -168,6 +169,12 @@ func (c *Client) Models(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(models)
 	return models, nil
+}
+
+// defaultDaemonSocketPath returns the standard codex app-server daemon control socket path.
+func defaultDaemonSocketPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
 }
 
 // FindBinary returns the path to the codex binary, searching in order:
