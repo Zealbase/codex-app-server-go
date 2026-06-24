@@ -1,0 +1,516 @@
+# codex-go: Full SDK Reference
+# Version: v0.2.0 | Protocol schema: v2 | Module: github.com/nharness/sdk/codex-go | Go 1.25+
+#
+# This file is the comprehensive machine-readable reference for codex-go.
+# See llms.txt for the condensed version.
+
+## Overview
+
+codex-go is the official Go SDK for the Codex app-server JSON-RPC 2.0 protocol.
+It provides:
+  - Transport adapters: stdio (local binary), WebSocket, HTTP SSE
+  - High-level SessionThread API: synchronous Run(), streaming RunStreamed()
+  - Typed event subscription with fan-out pub/sub
+  - Approval/request handler interfaces for interactive turns
+  - Wait helpers for turn completion and structured output extraction
+
+## Installation
+
+    go get github.com/nharness/sdk/codex-go
+
+Requires Go 1.25+.
+
+## Quick start (stdio)
+
+    cmd := exec.Command("codex", "app-server", "--stdio")
+    stdout, _ := cmd.StdoutPipe()
+    stdin, _ := cmd.StdinPipe()
+    _ = cmd.Start()
+
+    client, err := codexgo.New(codexgo.WithStdioTransport(stdout, stdin))
+    if err != nil { log.Fatal(err) }
+    defer client.Close()
+
+    ctx := context.Background()
+    _, err = client.Initialize(ctx, codexgo.InitializeRequest{
+        ClientInfo:   codexgo.ClientInfo{Name: "my-app", Version: "1.0.0"},
+        Capabilities: codexgo.Capabilities{ExperimentalAPI: true},
+    })
+
+    thread, _ := client.StartThread(ctx, codexgo.WithThreadModel("gpt-5.4"))
+    defer thread.Close()
+
+    result, _ := thread.Run(ctx, "Say hello.")
+    fmt.Println(result.FinalAgentText())
+
+## Quick start (WebSocket)
+
+    dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+    defer cancel()
+
+    client, err := codexgo.New(
+        codexgo.WithWSBearerToken("my-api-key"),
+        codexgo.WithWSTransport(dialCtx, "http://codex-server.example.com"),
+    )
+    if err != nil { log.Fatal(err) }
+    defer client.Close()
+
+    _, err = client.Initialize(ctx, codexgo.InitializeRequest{
+        ClientInfo:   codexgo.ClientInfo{Name: "my-app", Version: "1.0.0"},
+        Capabilities: codexgo.Capabilities{ExperimentalAPI: true},
+    })
+
+## Client Options
+
+### Transport options (mutually exclusive, pick one)
+
+    codexgo.WithStdioTransport(r io.ReadCloser, w io.WriteCloser) Option
+        Wrap a process's stdin/stdout. Used for local codex binary.
+
+    codexgo.WithTransport(t Transport) Option
+        Use a custom Transport implementation.
+
+    codexgo.WithHTTPTransport(endpoint string) Option
+        WIP. HTTP+SSE transport. The Codex app-server is WebSocket-only; this
+        transport requires the ws-http-bridge sidecar
+        (plugins/codex-server/ws-http-bridge) in front of the server. Without the
+        bridge, requests fail with HTTP 405. Prefer WithWSTransport.
+
+    codexgo.WithWSTransport(dialCtx context.Context, endpoint string) Option
+        WebSocket transport. Recommended for remote servers.
+        dialCtx controls the initial connection timeout only.
+
+    codexgo.WithReconnectingHTTPTransport(endpoint string) Option
+        WIP. Like WithHTTPTransport but auto-reconnects; same bridge requirement.
+
+    codexgo.WithRetry(cfg transport.RetryConfig) Option
+        Wrap the current transport with retry logic.
+
+### Auth options
+
+    codexgo.WithHTTPBearerToken(token string) Option
+        Sets Authorization: Bearer <token> on HTTP transport requests.
+
+    codexgo.WithWSBearerToken(token string) Option
+        Sets Authorization: Bearer <token> on WebSocket handshake.
+
+### Handler options
+
+    codexgo.WithApprovalHandler(handler ApprovalHandler) Option
+        Typed handler for command execution, file change, and permissions approvals.
+
+    codexgo.WithRequestHandler(handler RequestHandler) Option
+        Raw JSON-RPC server-request handler (lower level than ApprovalHandler).
+
+### Concurrency options
+
+    codexgo.WithMaxThreads(n int) Option
+        Limit concurrent SessionThread instances.
+        n = 0  → default (64)
+        n = -1 → unlimited
+        n > 0  → exactly n concurrent threads allowed
+        StartThread/ResumeThread block until a slot is available or ctx is done.
+
+## High-Level API: SessionThread
+
+StartThread and ResumeThread return a *SessionThread, which:
+  - Serializes concurrent turns via an internal mutex
+  - Releases a semaphore slot on Close()
+  - Provides convenience wrappers for all thread/turn operations
+
+    thread, err := client.StartThread(ctx context.Context, opts ...ThreadOption) (*SessionThread, error)
+    thread, err := client.ResumeThread(ctx context.Context, threadID string, opts ...ThreadOption) (*SessionThread, error)
+    thread.Close()  // MUST call to release semaphore slot; idempotent and goroutine-safe
+
+ThreadOption values:
+    codexgo.WithThreadModel(model string)
+    codexgo.WithThreadApprovalPolicy(policy string)
+    codexgo.WithThreadApprovalMode(mode ApprovalMode)
+    codexgo.WithThreadCWD(cwd string)
+    codexgo.WithThreadEphemeral(ephemeral bool)
+    codexgo.WithInitialInput(input string)
+        When set, StartThread/ResumeThread block until the first turn completes.
+
+## SessionThread Methods
+
+### Turn execution
+
+    result, err := thread.Run(ctx context.Context, input string, opts ...TurnOption) (*TurnResult, error)
+        Synchronous: blocks until the turn reaches completed/interrupted/failed.
+        Subscribes to events before sending TurnStart to avoid race conditions.
+        Returns nil error even for interrupted/failed turns; check result.Turn.Status.
+
+    events, err := thread.RunStreamed(ctx context.Context, input string, opts ...TurnOption) (<-chan ThreadEvent, error)
+        Streaming: returns a channel that receives ThreadEvent values until the turn ends.
+        The channel is closed on turn completion or context cancellation.
+        Callers MUST drain the channel (or cancel ctx) to release the turn mutex.
+        ThreadEvent{Kind string, Raw any}
+
+TurnOption values:
+    codexgo.WithModel(model string)
+    codexgo.WithApprovalPolicy(policy string)
+    codexgo.WithApprovalMode(mode ApprovalMode)
+    codexgo.WithSandbox(policy string)
+    codexgo.WithSandboxMode(mode SandboxMode)
+    codexgo.WithCWD(cwd string)
+    codexgo.WithEffort(effort string)
+    codexgo.WithSkill(skill string)
+    codexgo.WithInputs(inputs ...TurnInput)
+
+### Mid-turn control
+
+    err := thread.Steer(ctx context.Context, turnID, input string) error
+        Send additional text input to an in-progress turn.
+
+    err := thread.SteerInputs(ctx context.Context, turnID string, inputs ...TurnInput) error
+        Send typed multi-part input to an in-progress turn.
+
+    err := thread.Interrupt(ctx context.Context, turnID string) error
+        Send turn/interrupt to stop the current turn.
+
+### Thread management
+
+    err := thread.Archive(ctx context.Context) error
+    err := thread.Unarchive(ctx context.Context) error
+    err := thread.SetName(ctx context.Context, name string) error
+    err := thread.Rollback(ctx context.Context, turnIDs []string) error
+    err := thread.Compact(ctx context.Context) error
+        Triggers async context compaction (background LLM call on server).
+
+    forked, err := thread.Fork(ctx context.Context, turnID string, opts ...ThreadOption) (*SessionThread, error)
+        Create a new thread branching from this one. turnID="" forks from latest.
+
+    diff, err := thread.GitDiff(ctx context.Context, turnID string) (string, error)
+        Returns unified diff for the given turn (or latest if turnID="").
+
+### Goal tracking
+
+    err := thread.SetGoal(ctx context.Context, goal string) error
+    goal, err := thread.GetGoal(ctx context.Context) (ThreadGoal, error)
+    err := thread.ClearGoal(ctx context.Context) error
+
+## TurnResult
+
+    type TurnResult struct {
+        Turn      Turn        // final turn state; always populated
+        Items     []Item      // items from streaming events + turn state
+        Usage     *TokenUsage // nil when server does not report usage
+        Error     *TurnError  // non-nil when Status is "failed"
+        DeltaText string      // reconstructed agent text from delta events
+    }
+
+    func (r *TurnResult) FinalAgentText() string
+        Returns the last agent-message text. Search order:
+        1. Items: scans for ItemKindAgentMessage, extracts "text"/"content" fields
+        2. Turn.Items: same scan on server-returned items
+        3. DeltaText: joined streaming delta text
+        Returns "" if no agent text is found (e.g., interrupted turn, no LLM call).
+
+## Low-Level Client Methods
+
+All methods take context.Context as the first argument.
+
+### Initialization
+
+    (c *Client) Initialize(ctx, InitializeRequest) (InitializeResult, error)
+    (c *Client) Ping(ctx) error
+    (c *Client) Close() error
+
+### Thread lifecycle
+
+    (c *Client) ThreadStart(ctx, ThreadStartRequest) (Thread, error)
+    (c *Client) ThreadResume(ctx, ThreadResumeRequest) (Thread, error)
+    (c *Client) ThreadRead(ctx, ThreadReadRequest) (Thread, error)
+    (c *Client) ThreadFork(ctx, ThreadForkRequest) (Thread, error)
+    (c *Client) ThreadList(ctx, ThreadListRequest) ([]Thread, error)
+    (c *Client) ThreadLoadedList(ctx) ([]string, error)
+    (c *Client) ThreadArchive(ctx, ThreadArchiveRequest) error
+    (c *Client) ThreadUnarchive(ctx, ThreadUnarchiveRequest) error
+    (c *Client) ThreadSetName(ctx, ThreadSetNameRequest) error
+    (c *Client) ThreadRollback(ctx, ThreadRollbackRequest) error
+
+### Turn lifecycle
+
+    (c *Client) TurnStart(ctx, TurnStartRequest) (Turn, error)
+    (c *Client) TurnInterrupt(ctx, TurnInterruptRequest) error
+    (c *Client) TurnSteer(ctx, TurnSteerRequest) error
+    (c *Client) TurnDiff(ctx, TurnDiffRequest) (TurnDiffResult, error)
+    (c *Client) TurnRead(ctx, threadID, turnID string) (Turn, error)
+
+### Thread goals
+
+    (c *Client) ThreadGoalSet(ctx, ThreadGoalSetRequest) (ThreadGoal, error)
+    (c *Client) ThreadGoalGet(ctx, ThreadGoalGetRequest) (ThreadGoal, error)
+    (c *Client) ThreadGoalClear(ctx, ThreadGoalClearRequest) error
+
+### Config (slash-command equivalents)
+
+    (c *Client) SetModel(ctx, model string) error
+    (c *Client) SetApprovalPolicy(ctx, policy string) error
+    (c *Client) SetSandboxPolicy(ctx, policy string) error
+    (c *Client) Models(ctx) ([]string, error)
+
+### Config CRUD
+
+    (c *Client) ConfigRead(ctx, ConfigReadRequest) (ConfigReadResult, error)
+        ConfigReadRequest{CWD, IncludeLayers}; result {Config, Layers, Origins json.RawMessage}.
+    (c *Client) ConfigValueWrite(ctx, ConfigValueWriteRequest) error
+        {FilePath, KeyPath, Value json.RawMessage, MergeStrategy ("replace"|"upsert"), ExpectedVersion}.
+    (c *Client) ConfigBatchWrite(ctx, ConfigBatchWriteRequest) error
+        {FilePath, Edits json.RawMessage, ExpectedVersion, ReloadUserConfig}.
+
+### Skills
+
+    (c *Client) SkillsList(ctx, SkillsListRequest) (SkillsListResult, error)
+        SkillsListRequest{CWDs, ForceReload}; result Data []SkillsListEntry{CWD, Skills, Errors}.
+    (c *Client) SkillsConfigWrite(ctx, SkillsConfigWriteRequest) (SkillsConfigWriteResult, error)
+        {Name|Path, Enabled} -> {EffectiveEnabled}.
+    (c *Client) SkillsExtraRootsSet(ctx, SkillsExtraRootsSetRequest) error  // {ExtraRoots []string}
+
+### Experimental features
+
+    (c *Client) ExperimentalFeatureList(ctx, ExperimentalFeatureListRequest) (ExperimentalFeatureListResult, error)
+        {ThreadID, Cursor, Limit} -> {Data []ExperimentalFeature, NextCursor}. Empty NextCursor = last page.
+    (c *Client) ExperimentalFeatureEnablementSet(ctx, req) (ExperimentalFeatureEnablementSetResult, error)
+        {Enablement map[string]bool} -> {Enablement map[string]bool}.
+
+### Hooks (server-side)
+
+    (c *Client) HooksList(ctx, HooksListRequest) (HooksListResult, error)
+        {CWDs} -> {Data json.RawMessage}. Distinct from the client-side hook bridge (internal/hookbridge).
+
+### Thread extras (metadata / subscription / mutations)
+
+    (c *Client) ThreadMetadataUpdate(ctx, ThreadMetadataUpdateRequest) (ThreadMetadataUpdateResult, error)
+        {ThreadID, GitInfo *{Branch,OriginURL,Sha *string}} -> {Thread}. Patch stored Git metadata.
+    (c *Client) ThreadUnsubscribe(ctx, ThreadUnsubscribeRequest) (ThreadUnsubscribeResult, error)
+        {ThreadID} -> {Status: "notLoaded"|"notSubscribed"|"unsubscribed"}. Stops event delivery.
+    (c *Client) ThreadDelete(ctx, ThreadDeleteRequest) error                 // {ThreadID}
+    (c *Client) ThreadInjectItems(ctx, ThreadInjectItemsRequest) error       // {ThreadID, Items []json.RawMessage}
+    (c *Client) ThreadShellCommand(ctx, ThreadShellCommandRequest) error     // {ThreadID, Command}; unsandboxed, shell syntax
+    (c *Client) ThreadApproveGuardianDeniedAction(ctx, req) error            // {ThreadID, Event json.RawMessage}
+
+### Model provider capabilities
+
+    (c *Client) ModelProviderCapabilitiesRead(ctx) (ModelProviderCapabilities, error)
+        -> {NamespaceTools, ImageGeneration, WebSearch bool}.
+
+### Interactive command execution (PTY)
+
+    (c *Client) CommandExec(ctx, CommandExecRequest) (CommandExecResult, error)
+        CommandExecRequest{Command []string, CWD, Env, TTY, Size *{Cols,Rows}, StreamStdin,
+        StreamStdoutStderr, TimeoutMs, DisableTimeout, OutputBytesCap, DisableOutputCap,
+        ProcessID, SandboxPolicy json.RawMessage}; result {ExitCode, Stdout, Stderr}.
+    (c *Client) CommandExecWrite(ctx, CommandExecWriteRequest) error      // {ProcessID, DeltaBase64, CloseStdin}
+    (c *Client) CommandExecResize(ctx, CommandExecResizeRequest) error    // {ProcessID, Size{Cols,Rows}}
+    (c *Client) CommandExecTerminate(ctx, CommandExecTerminateRequest) error // {ProcessID}
+    (c *Client) CommandExecHandle(processID string) *CommandExecHandle
+        Handle: Write(ctx, deltaBase64) / CloseStdin(ctx) / Resize(ctx, cols, rows) / Terminate(ctx).
+    Streaming: subscribe to CommandExecOutputDeltaEvent{ProcessID, Stream, DeltaBase64, CapReached} via Events().
+
+### Events and wait helpers
+
+    (c *Client) Events() *EventSubscription
+    (c *Client) WaitForTurn(ctx, threadID, turnID string) (Turn, error)
+    (c *Client) WaitForFinalAgentMessage(ctx, threadID, turnID string) (string, error)
+    (c *Client) WaitForStructuredOutput(ctx, threadID, turnID string, out any) (Turn, error)
+
+## Event Subscription
+
+    sub := client.Events()
+    defer sub.Close()
+
+    for {
+        select {
+        case event, ok := <-sub.C():
+            if !ok { return } // broker closed
+            switch v := event.Value.(type) {
+            case codexgo.ItemAgentMessageDeltaEvent:
+                fmt.Print(v.Text) // streaming text chunk
+            case codexgo.ItemCompletedEvent:
+                // v.Item is the completed item
+            case codexgo.TurnCompletedEvent:
+                // v.Status, v.Usage, v.Turn
+            }
+        case <-ctx.Done():
+            return
+        }
+    }
+
+Notes:
+  - Subscribe BEFORE starting a turn to avoid missing early events.
+  - The subscription buffer holds 128 events; slow consumers are dropped.
+  - Events are not replayed to late subscribers.
+  - sub.C() returns nil for a nil/closed subscription (blocks forever in select).
+
+## Typed Notification Payloads
+
+All events have ThreadID and TurnID (where applicable):
+
+    TurnStartedEvent{ThreadID, TurnID string; Turn *Turn}
+    TurnCompletedEvent{ThreadID, TurnID string; Status TurnStatus; Turn *Turn; Usage *TokenUsage}
+    ItemStartedEvent{ThreadID, TurnID string; Item *Item}
+    ItemCompletedEvent{ThreadID, TurnID string; Item *Item}
+    ItemUpdatedEvent{ThreadID, TurnID string; Item *Item}
+    ThreadTokenUsageUpdatedEvent{ThreadID string; Usage *TokenUsage}
+    TurnDiffUpdatedEvent{ThreadID, TurnID string; Diff json.RawMessage}
+    TurnPlanUpdatedEvent{ThreadID, TurnID string; Plan json.RawMessage}
+    ErrorEvent{ThreadID, TurnID, Message, Code string; Data json.RawMessage}
+    ThreadStartedEvent{ThreadID string; Thread *Thread}
+    ThreadArchivedEvent{ThreadID string}
+    ThreadUnarchivedEvent{ThreadID string}
+    ThreadClosedEvent{ThreadID string}
+    ThreadStatusChangedEvent{ThreadID string; Status ThreadStatus}
+    ThreadGoalUpdatedEvent{ThreadID string; Goal *ThreadGoal}
+    ThreadGoalClearedEvent{ThreadID string}
+    ServerRequestResolvedEvent{ThreadID, RequestID string; Result json.RawMessage}
+    ItemAgentMessageDeltaEvent{ThreadID, TurnID, ItemID, Text string; Delta json.RawMessage}
+    ItemPlanDeltaEvent{ThreadID, TurnID, ItemID, Text string; Delta json.RawMessage}
+    ItemReasoningSummaryTextDeltaEvent{ThreadID, TurnID, ItemID, Text string}
+    ItemReasoningSummaryPartAddedEvent{ThreadID, TurnID, ItemID string; Part json.RawMessage}
+    ItemReasoningTextDeltaEvent{ThreadID, TurnID, ItemID, Text string}
+    ItemCommandExecutionOutputDeltaEvent{ThreadID, TurnID, ItemID, Stream, Output, Delta string}
+    ItemFileChangePatchUpdatedEvent{ThreadID, TurnID, ItemID string; Patch json.RawMessage}
+    ItemFileChangeOutputDeltaEvent{ThreadID, TurnID, ItemID, Output, Delta string}
+    ItemAutoApprovalReviewStartedEvent{ThreadID, TurnID, ItemID string}
+    ItemAutoApprovalReviewCompletedEvent{ThreadID, TurnID, ItemID string}
+    RawNotificationEvent{ThreadID, TurnID, ItemID string}  // unknown method fallback
+
+## Core Types
+
+    type Thread struct {
+        ID     string
+        Name   string
+        Status ThreadStatus
+        Turns  []Turn
+    }
+
+    type Turn struct {
+        ID          string
+        Items       []Item
+        ItemsView   TurnItemsView
+        Status      TurnStatus
+        Error       json.RawMessage
+        StartedAt   *time.Time
+        CompletedAt *time.Time
+        DurationMS  int64
+        Usage       *TokenUsage
+    }
+
+    type Item struct {
+        ID      string
+        Kind    ItemKind
+        Payload json.RawMessage
+    }
+    // Payload is the item's content minus "id" and "type" fields.
+    // Example agentMessage payload: {"text":"PONG","phase":"final_answer"}
+    item.Decode(&v)       // unmarshal Payload into v
+    item.PayloadBytes()   // raw JSON bytes of Payload
+
+    type TokenUsage struct {
+        InputTokens  int
+        OutputTokens int
+        TotalTokens  int
+    }
+
+    type ThreadGoal struct {
+        Objective string
+    }
+
+    type TurnError struct {
+        Code    string
+        Message string
+    }
+
+## Enums and Constants
+
+ThreadStatus (wire values):
+    ThreadStatusNotLoaded   = "notLoaded"
+    ThreadStatusIdle        = "idle"
+    ThreadStatusSystemError = "systemError"
+    ThreadStatusActive      = "active"
+
+TurnStatus (wire values):
+    TurnStatusInProgress  = "inProgress"
+    TurnStatusCompleted   = "completed"
+    TurnStatusInterrupted = "interrupted"
+    TurnStatusFailed      = "failed"
+
+TurnItemsView (wire values):
+    TurnItemsViewNotLoaded = "notLoaded"
+    TurnItemsViewSummary   = "summary"
+    TurnItemsViewFull      = "full"
+
+ApprovalMode (wire values):
+    ApprovalModeAuto      = "auto"
+    ApprovalModeOnRequest = "on-request"
+    ApprovalModeNever     = "never"
+    ApprovalModeAlways    = "always"
+
+SandboxMode (wire values):
+    SandboxReadOnly        = "read-only"
+    SandboxWorkspaceWrite  = "workspace-write"
+    SandboxFullAuto        = "full-auto"
+
+ItemKind constants (wire = Go constant name in camelCase):
+    ItemKindUserMessage, ItemKindHookPrompt, ItemKindAgentMessage,
+    ItemKindPlan, ItemKindReasoning, ItemKindCommandExecution, ItemKindFileChange,
+    ItemKindMCPToolCall, ItemKindDynamicToolCall, ItemKindCollabAgentToolCall,
+    ItemKindSubAgentActivity, ItemKindWebSearch, ItemKindImageView, ItemKindSleep,
+    ItemKindImageGeneration, ItemKindEnteredReviewMode, ItemKindExitedReviewMode,
+    ItemKindContextCompaction
+
+## Approval Handling
+
+    type ApprovalHandler interface {
+        HandleCommandExecutionApproval(context.Context, CommandExecutionApprovalRequest) (CommandExecutionApprovalResult, error)
+        HandleFileChangeApproval(context.Context, FileChangeApprovalRequest) (FileChangeApprovalResult, error)
+        HandlePermissionsApproval(context.Context, PermissionsApprovalRequest) (PermissionsApprovalResult, error)
+        HandleUserInputRequest(context.Context, UserInputRequest) (UserInputResult, error)
+    }
+
+    // Auto-accept all approvals:
+    client, _ := codexgo.New(
+        codexgo.WithStdioTransport(r, w),
+        codexgo.WithApprovalHandler(codexgo.AutoAcceptApprovalHandler{}),
+    )
+
+CommandExecution decision constants:
+    ApprovalDecisionAccept
+    ApprovalDecisionAcceptForSession
+    ApprovalDecisionAcceptWithExecPolicyAmendment
+    ApprovalDecisionApplyNetworkPolicyAmendment
+    ApprovalDecisionDecline
+    ApprovalDecisionCancel
+
+FileChange decision constants:
+    FileChangeApprovalDecisionAccept
+    FileChangeApprovalDecisionAcceptForSession
+    FileChangeApprovalDecisionDecline
+    FileChangeApprovalDecisionCancel
+
+## Transport Interface (for custom implementations)
+
+    type Transport interface {
+        Call(ctx context.Context, method string, params any, result any) error
+        Notify(ctx context.Context, method string, params any) error
+        SetRequestHandler(RequestHandler)
+        Close() error
+    }
+
+## Known Limitations
+
+- HTTP transport (WithHTTPTransport, WithReconnectingHTTPTransport) is WIP. The Codex
+  app-server is WebSocket-only; these transports require the ws-http-bridge sidecar
+  (plugins/codex-server/ws-http-bridge) deployed in front of the server. Connecting
+  directly to a WS-only server returns HTTP 405. Use WithWSTransport for remote servers.
+- Turn Usage (TokenUsage) is nil when the server does not include usage in the
+  turn/read response. Use WaitForFinalAgentMessage then TurnRead to get the most
+  up-to-date turn data.
+- Events are not replayed: subscribe before TurnStart to avoid missing early events.
+
+## Docs
+
+docs/index.md         -- quickstart examples and feature overview
+docs/api-reference.md -- complete type signatures and constants
+llms.txt              -- condensed machine-readable reference

@@ -1,0 +1,567 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nharness/sdk/codex-go/internal/protocol/schema/v2.schema.json",
+  "title": "Codex app-server protocol v2 core subset",
+  "$defs": {
+    "ThreadStatus": {
+      "type": "string",
+      "enum": ["notLoaded", "idle", "systemError", "active"]
+    },
+    "ThreadActiveFlag": {
+      "type": "string",
+      "enum": ["waitingOnApproval", "waitingOnUserInput"]
+    },
+    "TurnStatus": {
+      "type": "string",
+      "enum": ["completed", "interrupted", "failed", "inProgress"]
+    },
+    "TurnItemsView": {
+      "type": "string",
+      "enum": ["notLoaded", "summary", "full"]
+    },
+    "ItemKind": {
+      "type": "string",
+      "enum": [
+        "userMessage",
+        "hookPrompt",
+        "agentMessage",
+        "plan",
+        "reasoning",
+        "commandExecution",
+        "fileChange",
+        "mcpToolCall",
+        "dynamicToolCall",
+        "collabAgentToolCall",
+        "subAgentActivity",
+        "webSearch",
+        "imageView",
+        "sleep",
+        "imageGeneration",
+        "enteredReviewMode",
+        "exitedReviewMode",
+        "contextCompaction"
+      ]
+    },
+    "ApprovalDecision": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "acceptForSession",
+        "acceptWithExecpolicyAmendment",
+        "applyNetworkPolicyAmendment",
+        "decline",
+        "cancel"
+      ]
+    },
+    "FileChangeApprovalDecision": {
+      "type": "string",
+      "enum": ["accept", "acceptForSession", "decline", "cancel"]
+    },
+    "PermissionsScope": {
+      "type": "string",
+      "enum": ["session", "turn"]
+    },
+    "TokenUsage": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "inputTokens": { "type": "integer" },
+        "outputTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" },
+        "reasoningTokens": { "type": "integer" }
+      }
+    },
+    "TurnError": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "message": { "type": "string" },
+        "code": { "type": "string" },
+        "data": true
+      }
+    },
+    "Item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "$ref": "#/$defs/ItemKind" }
+      }
+    },
+    "Turn": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Item" }
+        },
+        "itemsView": { "$ref": "#/$defs/TurnItemsView" },
+        "status": { "$ref": "#/$defs/TurnStatus" },
+        "error": { "$ref": "#/$defs/TurnError" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "durationMs": { "type": "integer" },
+        "usage": { "$ref": "#/$defs/TokenUsage" }
+      }
+    },
+    "GitInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "root": { "type": "string" },
+        "branch": { "type": "string" },
+        "commit": { "type": "string" },
+        "remote": { "type": "string" },
+        "dirty": { "type": "boolean" },
+        "detached": { "type": "boolean" }
+      }
+    },
+    "Thread": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "forkedFromId": { "type": "string" },
+        "parentThreadId": { "type": "string" },
+        "preview": { "type": "string" },
+        "ephemeral": { "type": "boolean" },
+        "modelProvider": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "status": { "$ref": "#/$defs/ThreadStatus" },
+        "path": { "type": "string" },
+        "cwd": { "type": "string" },
+        "cliVersion": { "type": "string" },
+        "source": { "type": "string" },
+        "threadSource": { "type": "string" },
+        "agentNickname": { "type": "string" },
+        "agentRole": { "type": "string" },
+        "gitInfo": { "$ref": "#/$defs/GitInfo" },
+        "name": { "type": "string" },
+        "turns": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Turn" }
+        }
+      }
+    },
+    "RPCError": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "code": { "type": "integer" },
+        "message": { "type": "string" },
+        "data": true
+      },
+      "required": ["code", "message"]
+    },
+    "RPCRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "type": "string" },
+        "method": { "type": "string" },
+        "id": true,
+        "params": true
+      },
+      "required": ["method"]
+    },
+    "RPCResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "type": "string" },
+        "id": true,
+        "result": true,
+        "error": { "$ref": "#/$defs/RPCError" }
+      }
+    },
+    "RPCNotification": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "type": "string" },
+        "method": { "type": "string" },
+        "params": true
+      },
+      "required": ["method"]
+    },
+    "ClientInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "InitializeRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "clientInfo": { "$ref": "#/$defs/ClientInfo" },
+        "capabilities": true
+      }
+    },
+    "InitializeResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "userAgent": { "type": "string" },
+        "codexHome": { "type": "string" },
+        "platformFamily": { "type": "string" },
+        "platformOs": { "type": "string" }
+      }
+    },
+    "InitializedNotification": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "ThreadStartRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "model": { "type": "string" },
+        "cwd": { "type": "string" },
+        "sandboxPolicy": true,
+        "permissions": true,
+        "approvalPolicy": { "type": "string" },
+        "runtimeWorkspaceRoots": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "environments": true,
+        "personality": { "type": "string" },
+        "dynamicTools": true,
+        "ephemeral": { "type": "boolean" }
+      }
+    },
+    "ThreadStartResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "thread": { "$ref": "#/$defs/Thread" }
+      }
+    },
+    "ThreadResumeRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "history": true,
+        "path": { "type": "string" },
+        "excludeTurns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "initialTurnsPage": true
+      }
+    },
+    "ThreadResumeResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "thread": { "$ref": "#/$defs/Thread" }
+      }
+    },
+    "ThreadReadRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "includeTurns": { "type": "boolean" }
+      }
+    },
+    "ThreadReadResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "thread": { "$ref": "#/$defs/Thread" }
+      }
+    },
+    "TurnStartRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "input": true,
+        "clientUserMessageId": { "type": "string" },
+        "cwd": { "type": "string" },
+        "approvalPolicy": { "type": "string" },
+        "sandboxPolicy": true,
+        "model": { "type": "string" },
+        "serviceTier": { "type": "string" },
+        "effort": { "type": "string" },
+        "summary": { "type": "string" },
+        "outputSchema": true,
+        "collaborationMode": { "type": "string" },
+        "multiAgentMode": { "type": "string" },
+        "environments": true
+      }
+    },
+    "TurnStartResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "turn": { "$ref": "#/$defs/Turn" }
+      }
+    },
+    "TurnSteerRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "expectedTurnId": { "type": "string" },
+        "input": true
+      }
+    },
+    "TurnSteerResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "turn": { "$ref": "#/$defs/Turn" }
+      }
+    },
+    "TurnInterruptRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" }
+      }
+    },
+    "TurnInterruptResponse": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "TurnStartedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "turn": { "$ref": "#/$defs/Turn" }
+      }
+    },
+    "TurnCompletedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "status": { "$ref": "#/$defs/TurnStatus" },
+        "turn": { "$ref": "#/$defs/Turn" },
+        "usage": { "$ref": "#/$defs/TokenUsage" }
+      }
+    },
+    "ItemStartedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "item": { "$ref": "#/$defs/Item" }
+      }
+    },
+    "ItemCompletedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "item": { "$ref": "#/$defs/Item" }
+      }
+    },
+    "ThreadTokenUsageUpdatedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "usage": { "$ref": "#/$defs/TokenUsage" }
+      }
+    },
+    "TurnDiffUpdatedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "diff": true
+      }
+    },
+    "TurnPlanUpdatedEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "plan": true
+      }
+    },
+    "ErrorEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "message": { "type": "string" },
+        "code": { "type": "string" },
+        "data": true
+      }
+    },
+    "CommandExecutionApprovalRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "itemId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "environmentId": { "type": "string" },
+        "approvalId": { "type": "string" },
+        "reason": { "type": "string" },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "commandActions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "networkApprovalContext": true
+      }
+    },
+    "CommandExecutionApprovalResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "decision": { "$ref": "#/$defs/ApprovalDecision" }
+      },
+      "required": ["decision"]
+    },
+    "FileChangeApprovalRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "itemId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "reason": { "type": "string" },
+        "grantRoot": { "type": "string" }
+      }
+    },
+    "FileChangeApprovalResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "decision": { "$ref": "#/$defs/FileChangeApprovalDecision" }
+      },
+      "required": ["decision"]
+    },
+    "PermissionsApprovalRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "itemId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "reason": { "type": "string" },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "scope": { "$ref": "#/$defs/PermissionsScope" }
+      }
+    },
+    "PermissionsApprovalResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "scope": { "$ref": "#/$defs/PermissionsScope" }
+      }
+    },
+    "UserInputOption": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "label": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "UserInputQuestion": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "header": { "type": "string" },
+        "id": { "type": "string" },
+        "question": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UserInputOption" }
+        }
+      }
+    },
+    "UserInputRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "itemId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "questions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UserInputQuestion" }
+        }
+      }
+    },
+    "UserInputResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "answers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "MCPServerElicitationRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "itemId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "kind": { "type": "string" },
+        "form": true,
+        "url": { "type": "string" }
+      }
+    },
+    "MCPServerElicitationResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "decision": { "$ref": "#/$defs/ApprovalDecision" }
+      },
+      "required": ["decision"]
+    },
+    "AttestationGenerateResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "token": { "type": "string" }
+      },
+      "required": ["token"]
+    },
+    "CurrentTimeReadResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "currentTimeAt": { "type": "integer" }
+      },
+      "required": ["currentTimeAt"]
+    }
+  }
+}

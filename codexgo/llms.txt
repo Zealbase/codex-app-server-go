@@ -1,0 +1,174 @@
+# codex-go: Go SDK for the Codex app-server JSON-RPC protocol
+# Version: v0.2.0 | Protocol schema: v2 | Module: github.com/nharness/sdk/codex-go | Go 1.25+
+
+## Install
+go get github.com/nharness/sdk/codex-go
+
+## Client creation
+client, err := codexgo.New(opts...)
+# Transport opts (pick one):
+#   WithStdioTransport(r, w)       -- local binary via stdin/stdout
+#   WithWSTransport(dialCtx, url)  -- WebSocket (recommended for remote)
+#   WithHTTPTransport(url)         -- WIP: HTTP+SSE; needs ws-http-bridge sidecar (else 405)
+#   WithReconnectingHTTPTransport(url)  -- WIP: same bridge requirement
+#   WithRetry(cfg)                 -- wrap current transport with retry
+# Auth opts:
+#   WithHTTPBearerToken(token)
+#   WithWSBearerToken(token)
+# Handler opts:
+#   WithApprovalHandler(h)
+#   WithRequestHandler(h)
+# Concurrency opts:
+#   WithMaxThreads(n)  -- -1=unlimited, 0=default(64)
+
+## High-level session API (recommended)
+thread, err := client.StartThread(ctx, opts...)   // returns *SessionThread
+thread, err := client.ResumeThread(ctx, id, opts...)
+thread.Close()  // release semaphore slot
+
+# ThreadOption helpers:
+#   WithThreadModel(model), WithThreadApprovalMode(mode), WithThreadCWD(cwd)
+#   WithThreadEphemeral(bool), WithInitialInput(input)
+
+result, err := thread.Run(ctx, "prompt", opts...)   // synchronous turn
+# TurnOption: WithModel, WithApprovalMode, WithSandboxMode, WithCWD, WithEffort, WithSkill, WithInputs
+
+result.FinalAgentText() string  -- last agent-message text (searches Items, Turn.Items, DeltaText)
+result.Turn.Status              -- "completed" | "interrupted" | "failed"
+result.Usage                    -- *TokenUsage; nil when server does not report it
+result.Items                    -- []Item captured via streaming events
+result.DeltaText                -- streaming delta fallback text
+
+events, err := thread.RunStreamed(ctx, "prompt")  // streaming; drain or cancel ctx
+
+## Client methods (all take context.Context)
+Initialize(ctx, InitializeRequest) (InitializeResult, error)
+ThreadStart(ctx, ThreadStartRequest) (Thread, error)
+ThreadResume(ctx, ThreadResumeRequest) (Thread, error)
+ThreadRead(ctx, ThreadReadRequest) (Thread, error)
+ThreadFork(ctx, ThreadForkRequest) (Thread, error)
+ThreadList(ctx, ThreadListRequest) ([]Thread, error)
+ThreadLoadedList(ctx) ([]string, error)
+ThreadArchive(ctx, ThreadArchiveRequest) error
+ThreadUnarchive(ctx, ThreadUnarchiveRequest) error
+ThreadSetName(ctx, ThreadSetNameRequest) error
+ThreadRollback(ctx, ThreadRollbackRequest) error
+TurnStart(ctx, TurnStartRequest) (Turn, error)
+TurnInterrupt(ctx, TurnInterruptRequest) error
+TurnSteer(ctx, TurnSteerRequest) error
+TurnDiff(ctx, TurnDiffRequest) (TurnDiffResult, error)
+TurnRead(ctx, threadID, turnID string) (Turn, error)
+ThreadGoalSet/Get/Clear(ctx, req)
+SetModel(ctx, model) / SetApprovalPolicy(ctx, policy) / SetSandboxPolicy(ctx, policy)
+Models(ctx) ([]string, error)
+# Config CRUD:
+ConfigRead(ctx, ConfigReadRequest) (ConfigReadResult, error)
+ConfigValueWrite(ctx, ConfigValueWriteRequest) error
+ConfigBatchWrite(ctx, ConfigBatchWriteRequest) error
+# Skills:
+SkillsList(ctx, SkillsListRequest) (SkillsListResult, error)
+SkillsConfigWrite(ctx, SkillsConfigWriteRequest) (SkillsConfigWriteResult, error)
+SkillsExtraRootsSet(ctx, SkillsExtraRootsSetRequest) error
+# Experimental features:
+ExperimentalFeatureList(ctx, ExperimentalFeatureListRequest) (ExperimentalFeatureListResult, error)
+ExperimentalFeatureEnablementSet(ctx, req) (ExperimentalFeatureEnablementSetResult, error)
+# Hooks (server-side; not the client-side hook bridge):
+HooksList(ctx, HooksListRequest) (HooksListResult, error)
+# Thread extras:
+ThreadMetadataUpdate(ctx, req) (ThreadMetadataUpdateResult{Thread}, error)
+ThreadUnsubscribe(ctx, req) (ThreadUnsubscribeResult{Status}, error)  -- status: notLoaded|notSubscribed|unsubscribed
+ThreadDelete(ctx, ThreadDeleteRequest) error
+ThreadInjectItems(ctx, req) error  -- {ThreadID, Items []json.RawMessage}
+ThreadShellCommand(ctx, req) error  -- {ThreadID, Command}; unsandboxed, preserves shell syntax
+ThreadApproveGuardianDeniedAction(ctx, req) error  -- {ThreadID, Event json.RawMessage}
+# Model provider capabilities:
+ModelProviderCapabilitiesRead(ctx) (ModelProviderCapabilities{NamespaceTools,ImageGeneration,WebSearch}, error)
+# Interactive command exec (PTY):
+CommandExec(ctx, CommandExecRequest) (CommandExecResult, error)
+CommandExecWrite/Resize/Terminate(ctx, req) error
+CommandExecHandle(processID) *CommandExecHandle  -- Write/CloseStdin/Resize/Terminate helpers
+# stream via CommandExecOutputDeltaEvent on Events()
+Ping(ctx) error
+Close() error
+
+## Wait helpers
+WaitForTurn(ctx, threadID, turnID) (Turn, error)
+WaitForFinalAgentMessage(ctx, threadID, turnID) (string, error)
+WaitForStructuredOutput(ctx, threadID, turnID, &out) (Turn, error)
+
+## SessionThread methods
+thread.ID() string
+thread.Run(ctx, input, opts...) (*TurnResult, error)
+thread.RunStreamed(ctx, input, opts...) (<-chan ThreadEvent, error)
+thread.Steer(ctx, turnID, input) error
+thread.SteerInputs(ctx, turnID, inputs...) error
+thread.Interrupt(ctx, turnID) error
+thread.Archive(ctx) / Unarchive(ctx) / SetName(ctx, name) error
+thread.Fork(ctx, turnID, opts...) (*SessionThread, error)
+thread.Rollback(ctx, turnIDs) error
+thread.Compact(ctx) error
+thread.GitDiff(ctx, turnID) (string, error)
+thread.SetGoal/GetGoal/ClearGoal(ctx, ...) error
+
+## Event subscription
+sub := client.Events()
+defer sub.Close()
+for event := range sub.C() {
+    switch v := event.Value.(type) {
+    case codexgo.ItemAgentMessageDeltaEvent: // v.Text
+    case codexgo.TurnCompletedEvent:         // v.TurnID, v.Status, v.Usage
+    case codexgo.ItemCompletedEvent:         // v.Item
+    }
+}
+
+## Key types
+Thread{ID, Name, Status ThreadStatus, Turns []Turn}
+Turn{ID, Items []Item, ItemsView TurnItemsView, Status TurnStatus, Usage *TokenUsage, StartedAt, CompletedAt *time.Time}
+Item{ID, Kind ItemKind, Payload json.RawMessage}
+TurnResult{Turn, Items []Item, Usage *TokenUsage, Error *TurnError, DeltaText string}
+TokenUsage{InputTokens, OutputTokens, TotalTokens int}
+
+## Enums (wire values in quotes)
+ThreadStatus: "notLoaded" | "idle" | "active" | "systemError"
+TurnStatus: "inProgress" | "completed" | "interrupted" | "failed"
+TurnItemsView: "notLoaded" | "summary" | "full"
+ApprovalMode: "auto" | "on-request" | "never" | "always"
+SandboxMode: "read-only" | "workspace-write" | "full-auto"
+ItemKind: userMessage | agentMessage | plan | reasoning | commandExecution | fileChange |
+  mcpToolCall | dynamicToolCall | collabAgentToolCall | subAgentActivity | webSearch |
+  imageView | imageGeneration | sleep | enteredReviewMode | exitedReviewMode |
+  contextCompaction | hookPrompt
+
+## ApprovalHandler interface
+HandleCommandExecutionApproval(ctx, CommandExecutionApprovalRequest) (CommandExecutionApprovalResult, error)
+HandleFileChangeApproval(ctx, FileChangeApprovalRequest) (FileChangeApprovalResult, error)
+HandlePermissionsApproval(ctx, PermissionsApprovalRequest) (PermissionsApprovalResult, error)
+HandleUserInputRequest(ctx, UserInputRequest) (UserInputResult, error)
+# Decision values: accept | acceptForSession | decline | cancel (+ exec/network policy amendments)
+
+## Server-push notification types
+TurnStartedEvent, TurnCompletedEvent{Usage *TokenUsage}, ItemStartedEvent, ItemCompletedEvent,
+ItemUpdatedEvent, TurnDiffUpdatedEvent, TurnPlanUpdatedEvent, ThreadTokenUsageUpdatedEvent,
+ThreadStartedEvent, ThreadArchivedEvent, ThreadUnarchivedEvent, ThreadClosedEvent,
+ThreadStatusChangedEvent, ThreadGoalUpdatedEvent, ThreadGoalClearedEvent,
+ServerRequestResolvedEvent, ErrorEvent,
+ItemAgentMessageDeltaEvent{Text}, ItemPlanDeltaEvent{Text},
+ItemReasoningSummaryTextDeltaEvent{Text}, ItemReasoningTextDeltaEvent{Text},
+ItemCommandExecutionOutputDeltaEvent{Delta}, ItemFileChangePatchUpdatedEvent,
+ItemAutoApprovalReviewStartedEvent, ItemAutoApprovalReviewCompletedEvent
+# Extra notifications (events_extra.go) — 65/68 notifications typed:
+ThreadDeletedEvent, ThreadNameUpdatedEvent, ThreadCompactedEvent, ThreadSettingsUpdatedEvent,
+AccountUpdatedEvent, AccountRateLimitsUpdatedEvent, WarningEvent, ConfigWarningEvent,
+DeprecationNoticeEvent, GuardianWarningEvent, WindowsWorldWritableWarningEvent,
+WindowsSandboxSetupCompletedEvent, ModelReroutedEvent, ModelVerificationEvent,
+TurnModerationMetadataEvent, ProcessExitedEvent, ProcessOutputDeltaEvent,
+TerminalInteractionEvent, McpToolCallProgressEvent, HookStartedEvent, HookCompletedEvent,
+RawResponseItemCompletedEvent, McpServerStatusUpdatedEvent, McpServerOauthLoginCompletedEvent,
+SkillsChangedEvent, FsChangedEvent, AppListUpdatedEvent, RemoteControlStatusChangedEvent,
+ExternalAgentConfigImportCompletedEvent, ExternalAgentConfigImportProgressEvent,
+ThreadRealtime{Started,Closed,Error,ItemAdded,Sdp,OutputAudioDelta,TranscriptDelta,TranscriptDone}Event
+# Unknown methods -> RawNotificationEvent (3 schema-only notifications remain untyped)
+
+## Docs
+docs/index.md         -- quickstart, transport table, SessionThread guide
+docs/api-reference.md -- full signatures, types, constants
