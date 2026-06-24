@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	codexgo "github.com/zealbase/codex-app-server-go/codexgo"
+	codexgo "github.com/zealbase/codex-app-server-go"
 )
 
 func main() {

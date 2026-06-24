@@ -2,11 +2,11 @@
 
 > A typed Go client for the Codex app-server **v2** JSON-RPC protocol — drive AI coding agents from Go.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/zealbase/codex-app-server-go/codexgo.svg)](https://pkg.go.dev/github.com/zealbase/codex-app-server-go/codexgo)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zealbase/codex-app-server-go.svg)](https://pkg.go.dev/github.com/zealbase/codex-app-server-go)
 [![Go Report Card](https://goreportcard.com/badge/github.com/zealbase/codex-app-server-go)](https://goreportcard.com/report/github.com/zealbase/codex-app-server-go)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](go.mod)
-[![Protocol](https://img.shields.io/badge/codex--cli-0.142.0-orange)](codexgo/internal/protocol/schema/version.go)
+[![Protocol](https://img.shields.io/badge/codex--cli-0.142.0-orange)](internal/protocol/schema/version.go)
 
 ## What's Implemented
 
@@ -30,11 +30,11 @@ Server → client notifications: **65 of 68** typed-decoded.
 ## Install
 
 ```bash
-go get github.com/zealbase/codex-app-server-go/codexgo
+go get github.com/zealbase/codex-app-server-go
 ```
 
 ```go
-import codexgo "github.com/zealbase/codex-app-server-go/codexgo"
+import codexgo "github.com/zealbase/codex-app-server-go"
 ```
 
 **Version:** `v0.2.0` · **Protocol:** Codex app-server **v2** · **Go:** 1.25+
@@ -131,13 +131,13 @@ Verified against **codex-cli `0.142.0`** · schema sha256 `935c753c…`
 | MCP lifecycle | 0 | 4 | 0% |
 | Remote control | 0 | 2 | 0% |
 
-See [`codexgo/gen/conformance-report.md`](codexgo/gen/conformance-report.md) for the full method-by-method breakdown.
+See [`gen/conformance-report.md`](gen/conformance-report.md) for the full method-by-method breakdown.
 
 ## Documentation
 
-- [`codexgo/docs/index.md`](codexgo/docs/index.md) — guide, transports, SessionThread, wait helpers
-- [`codexgo/docs/api-reference.md`](codexgo/docs/api-reference.md) — full type & method reference
-- [`codexgo/llms.txt`](codexgo/llms.txt) / [`codexgo/llms-full.txt`](codexgo/llms-full.txt) — machine-readable references
+- [`docs/index.md`](docs/index.md) — guide, transports, SessionThread, wait helpers
+- [`docs/api-reference.md`](docs/api-reference.md) — full type & method reference
+- [`llms.txt`](llms.txt) / [`llms-full.txt`](llms-full.txt) — machine-readable references
 
 ## Protocol reference
 
@@ -149,7 +149,7 @@ codex app-server generate-json-schema --out <dir>
 ```
 
 A pinned copy ships at
-`codexgo/internal/protocol/schema/codex_app_server_protocol.v2.schemas.json`.
+`internal/protocol/schema/codex_app_server_protocol.v2.schemas.json`.
 Upstream protocol source: [`openai/codex`](https://github.com/openai/codex) —
 `codex-rs/app-server-protocol/`.
 
