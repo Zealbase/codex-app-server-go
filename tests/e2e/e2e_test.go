@@ -6,7 +6,7 @@
 //
 // Run with:
 //
-//	go test -v -count=1 -timeout 300s -tags e2e ./codex-go/tests/e2e/...
+//	go test -v -count=1 -timeout 300s -tags e2e ./tests/e2e/...
 //
 // Environment variables:
 //

@@ -1,6 +1,6 @@
 # API Reference
 
-Package: `github.com/nharness/sdk/codex-go`
+Package: `github.com/zealbase/codex-app-server-go`
 
 ## Client
 

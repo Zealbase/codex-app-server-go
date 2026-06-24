@@ -7,7 +7,7 @@ Version: `v0.2.0` | Protocol schema: `v2` | Go `1.25+`
 ## Installation
 
 ```bash
-go get github.com/nharness/sdk/codex-go
+go get github.com/zealbase/codex-app-server-go
 ```
 
 ## Quickstart
@@ -23,7 +23,7 @@ import (
 	"os"
 	"os/exec"
 
-	codexgo "github.com/nharness/sdk/codex-go"
+	codexgo "github.com/zealbase/codex-app-server-go"
 )
 
 func main() {
