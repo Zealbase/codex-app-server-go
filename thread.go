@@ -55,6 +55,13 @@ func WithThreadEphemeral(ephemeral bool) ThreadOption {
 	}
 }
 
+// WithThreadPersonality sets the personality (system-prompt override) when starting a thread.
+func WithThreadPersonality(p string) ThreadOption {
+	return func(c *threadConfig) {
+		c.req.Personality = p
+	}
+}
+
 // WithInitialInput sets a prompt to run immediately after the thread starts.
 // If set, StartThread / ResumeThread return only after the first turn completes.
 func WithInitialInput(input string) ThreadOption {
