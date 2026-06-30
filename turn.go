@@ -1,6 +1,7 @@
 package codexgo
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/zealbase/codex-app-server-go/internal/protocol"
@@ -109,6 +110,14 @@ func WithEffort(effort string) TurnOption {
 // WithSkill sets a specific skill to invoke for this turn.
 func WithSkill(skill string) TurnOption {
 	return func(r *TurnStartRequest) { r.Skill = skill }
+}
+
+// WithOutputSchema sets the output schema for constraining the assistant's final message.
+func WithOutputSchema(schema any) TurnOption {
+	return func(r *TurnStartRequest) {
+		data, _ := json.Marshal(schema)
+		r.OutputSchema = data
+	}
 }
 
 // applyTurnOptions applies all TurnOption values to req.
