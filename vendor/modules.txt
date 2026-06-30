@@ -1,0 +1,20 @@
+# github.com/creachadair/jrpc2 v1.3.5
+## explicit; go 1.25.0
+github.com/creachadair/jrpc2
+github.com/creachadair/jrpc2/channel
+# github.com/creachadair/mds v0.26.1
+## explicit; go 1.25.0
+github.com/creachadair/mds/queue
+github.com/creachadair/mds/slice
+# golang.org/x/sync v0.19.0
+## explicit; go 1.24.0
+golang.org/x/sync/errgroup
+golang.org/x/sync/semaphore
+# nhooyr.io/websocket v1.8.17
+## explicit; go 1.19
+nhooyr.io/websocket
+nhooyr.io/websocket/internal/bpool
+nhooyr.io/websocket/internal/errd
+nhooyr.io/websocket/internal/util
+nhooyr.io/websocket/internal/wsjs
+nhooyr.io/websocket/internal/xsync
