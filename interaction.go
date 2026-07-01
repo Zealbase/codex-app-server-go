@@ -139,9 +139,36 @@ type DynamicToolCallRequest struct {
 	ItemID    string          `json:"itemId"`
 }
 
+// DynamicToolCallOutputContentItem is a single content item returned in a
+// DynamicToolCallResult. It is a discriminated union matching the
+// DynamicToolCallOutputContentItem schema: exactly one of the "inputText" or
+// "inputImage" variants. Construct values with TextContent or ImageContent
+// rather than populating the fields directly.
+type DynamicToolCallOutputContentItem struct {
+	// Type discriminates the variant: "inputText" or "inputImage".
+	Type string `json:"type"`
+
+	// Text holds the payload for the "inputText" variant.
+	Text string `json:"text,omitempty"`
+
+	// ImageURL holds the payload for the "inputImage" variant.
+	ImageURL string `json:"imageUrl,omitempty"`
+}
+
+// TextContent builds an "inputText" DynamicToolCallOutputContentItem.
+func TextContent(text string) DynamicToolCallOutputContentItem {
+	return DynamicToolCallOutputContentItem{Type: "inputText", Text: text}
+}
+
+// ImageContent builds an "inputImage" DynamicToolCallOutputContentItem.
+func ImageContent(url string) DynamicToolCallOutputContentItem {
+	return DynamicToolCallOutputContentItem{Type: "inputImage", ImageURL: url}
+}
+
 // DynamicToolCallResult is the response to a DynamicToolCallRequest.
 type DynamicToolCallResult struct {
-	Content []json.RawMessage `json:"content"`
+	ContentItems []DynamicToolCallOutputContentItem `json:"contentItems"`
+	Success      bool                               `json:"success"`
 }
 
 // Dispatcher routes incoming server requests to specialised handlers by method.
@@ -203,7 +230,7 @@ func (d *Dispatcher) HandleServerRequest(ctx context.Context, req ServerRequest)
 
 	case protocol.MethodItemToolCall:
 		if d.DynamicTool == nil {
-			return serverResponseFrom(DynamicToolCallResult{Content: []json.RawMessage{}})
+			return serverResponseFrom(DynamicToolCallResult{ContentItems: []DynamicToolCallOutputContentItem{}, Success: false})
 		}
 		var r DynamicToolCallRequest
 		if err := json.Unmarshal(req.Params, &r); err != nil {

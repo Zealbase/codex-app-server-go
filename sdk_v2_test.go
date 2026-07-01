@@ -1213,15 +1213,103 @@ func TestDynamicToolCallNoHandler(t *testing.T) {
 		t.Fatalf("RequestAndWait: %v", err)
 	}
 
-	// Expect {"content":[]} response.
+	// Expect {"contentItems":[],"success":false} response.
 	var resp struct {
-		Content []json.RawMessage `json:"content"`
+		ContentItems []json.RawMessage `json:"contentItems"`
+		Success      bool              `json:"success"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v (raw: %s)", err, string(result))
 	}
-	if len(resp.Content) != 0 {
-		t.Fatalf("expected empty content array, got %d items", len(resp.Content))
+	if len(resp.ContentItems) != 0 {
+		t.Fatalf("expected empty contentItems array, got %d items", len(resp.ContentItems))
+	}
+	if resp.Success {
+		t.Fatalf("expected success=false when no handler is registered")
+	}
+}
+
+// ---- F6e-bis: TestDynamicToolCallResultWireShape ----
+
+func TestDynamicToolCallResultWireShape(t *testing.T) {
+	result := codexgo.DynamicToolCallResult{
+		ContentItems: []codexgo.DynamicToolCallOutputContentItem{
+			codexgo.TextContent("hello"),
+			codexgo.ImageContent("https://example.com/image.png"),
+		},
+		Success: true,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Assert the exact wire shape: top-level "contentItems"/"success" keys,
+	// and each content item using the discriminated "type" field with its
+	// matching payload key ("text" or "imageUrl").
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal top-level: %v", err)
+	}
+	if _, ok := raw["contentItems"]; !ok {
+		t.Fatalf("expected top-level %q key, got: %s", "contentItems", data)
+	}
+	if _, ok := raw["success"]; !ok {
+		t.Fatalf("expected top-level %q key, got: %s", "success", data)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(raw["contentItems"], &items); err != nil {
+		t.Fatalf("unmarshal contentItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 content items, got %d", len(items))
+	}
+
+	if items[0]["type"] != "inputText" {
+		t.Fatalf("expected first item type %q, got %v", "inputText", items[0]["type"])
+	}
+	if items[0]["text"] != "hello" {
+		t.Fatalf("expected first item text %q, got %v", "hello", items[0]["text"])
+	}
+	if _, ok := items[0]["imageUrl"]; ok {
+		t.Fatalf("did not expect imageUrl key on inputText item: %v", items[0])
+	}
+
+	if items[1]["type"] != "inputImage" {
+		t.Fatalf("expected second item type %q, got %v", "inputImage", items[1]["type"])
+	}
+	if items[1]["imageUrl"] != "https://example.com/image.png" {
+		t.Fatalf("expected second item imageUrl %q, got %v", "https://example.com/image.png", items[1]["imageUrl"])
+	}
+	if _, ok := items[1]["text"]; ok {
+		t.Fatalf("did not expect text key on inputImage item: %v", items[1])
+	}
+
+	var success bool
+	if err := json.Unmarshal(raw["success"], &success); err != nil {
+		t.Fatalf("unmarshal success: %v", err)
+	}
+	if !success {
+		t.Fatalf("expected success=true")
+	}
+
+	// Round-trip: unmarshal back into DynamicToolCallResult and confirm equality.
+	var roundTripped codexgo.DynamicToolCallResult
+	if err := json.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("unmarshal into DynamicToolCallResult: %v", err)
+	}
+	if roundTripped.Success != result.Success {
+		t.Fatalf("Success mismatch after round-trip: got %v, want %v", roundTripped.Success, result.Success)
+	}
+	if len(roundTripped.ContentItems) != len(result.ContentItems) {
+		t.Fatalf("ContentItems length mismatch after round-trip: got %d, want %d", len(roundTripped.ContentItems), len(result.ContentItems))
+	}
+	for i := range result.ContentItems {
+		if roundTripped.ContentItems[i] != result.ContentItems[i] {
+			t.Fatalf("ContentItems[%d] mismatch after round-trip: got %+v, want %+v", i, roundTripped.ContentItems[i], result.ContentItems[i])
+		}
 	}
 }
 
