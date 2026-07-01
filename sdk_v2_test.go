@@ -1229,6 +1229,37 @@ func TestDynamicToolCallNoHandler(t *testing.T) {
 	}
 }
 
+// ---- F6e-ter: TestDynamicToolCallRequestWireShape ----
+
+// TestDynamicToolCallRequestWireShape confirms DynamicToolCallRequest
+// unmarshals the real item/tool/call wire shape: "tool" (not "toolName"),
+// "arguments" (not "input"), and "callId" (not "itemId") into ToolName,
+// ToolInput, and ItemID respectively.
+func TestDynamicToolCallRequestWireShape(t *testing.T) {
+	raw := []byte(`{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","namespace":null,"tool":"my_tool","arguments":{"foo":"bar"}}`)
+
+	var req codexgo.DynamicToolCallRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatalf("unmarshal DynamicToolCallRequest: %v", err)
+	}
+
+	if req.ToolName != "my_tool" {
+		t.Errorf("ToolName = %q, want %q", req.ToolName, "my_tool")
+	}
+	if req.ThreadID != "thread-1" {
+		t.Errorf("ThreadID = %q, want %q", req.ThreadID, "thread-1")
+	}
+	if req.TurnID != "turn-1" {
+		t.Errorf("TurnID = %q, want %q", req.TurnID, "turn-1")
+	}
+	if req.ItemID != "call-1" {
+		t.Errorf("ItemID = %q, want %q (from wire's callId)", req.ItemID, "call-1")
+	}
+	if string(req.ToolInput) != `{"foo":"bar"}` {
+		t.Errorf("ToolInput = %s, want %s", req.ToolInput, `{"foo":"bar"}`)
+	}
+}
+
 // ---- F6e-bis: TestDynamicToolCallResultWireShape ----
 
 func TestDynamicToolCallResultWireShape(t *testing.T) {

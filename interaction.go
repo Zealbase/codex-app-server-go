@@ -132,11 +132,15 @@ type DynamicToolHandler interface {
 
 // DynamicToolCallRequest is the payload for an "item/tool/call" server-initiated request.
 type DynamicToolCallRequest struct {
-	ToolName  string          `json:"toolName"`
-	ToolInput json.RawMessage `json:"input"`
+	ToolName  string          `json:"tool"`
+	ToolInput json.RawMessage `json:"arguments"`
 	ThreadID  string          `json:"threadId"`
 	TurnID    string          `json:"turnId"`
-	ItemID    string          `json:"itemId"`
+	// ItemID is populated from the wire's "callId" — unlike other item/*
+	// message types in this package, item/tool/call identifies the call via
+	// callId, not itemId. Field kept named ItemID for source compatibility
+	// with existing callers.
+	ItemID string `json:"callId"`
 }
 
 // DynamicToolCallOutputContentItem is a single content item returned in a
